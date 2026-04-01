@@ -1,8 +1,14 @@
 use mpd::{Client, Idle};
 
 pub fn check_player_change() {
-    let mut client = Client::connect("127.0.0.1:6600").unwrap();
-    client.idle(&[mpd::idle::Subsystem::Player]).ok();
+    match Client::connect("127.0.0.1:6600") {
+        Ok(mut client) => {
+            client.idle(&[mpd::idle::Subsystem::Player]).ok();
+        }
+        Err(_) => {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+    }
 }
 
 #[cfg(test)]

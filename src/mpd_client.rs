@@ -26,16 +26,25 @@ impl LiveMpdClient {
         Self { addr: addr.into() }
     }
 
-    fn connect(&self) -> Client {
-        Client::connect(&self.addr).unwrap()
+    fn connect(&self) -> Option<Client> {
+        Client::connect(&self.addr).ok()
     }
 }
 
 impl MpdClient for LiveMpdClient {
     fn get_song_info(&self) -> SongInfo {
-        let mut client = self.connect();
-        let playing = client.status().unwrap().state == State::Play;
-        let current_song = client.currentsong().unwrap();
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return SongInfo {
+                title: "Disconnected".to_string(),
+                artist: String::new(),
+                album: String::new(),
+                playing: false,
+            },
+        };
+
+        let playing = client.status().map(|s| s.state == State::Play).unwrap_or(false);
+        let current_song = client.currentsong().unwrap_or(None);
 
         let (title, artist, album) = if let Some(song) = current_song {
             let title = song.title.unwrap_or_else(|| "Unknown".to_string());
@@ -58,8 +67,11 @@ impl MpdClient for LiveMpdClient {
     }
 
     fn get_album_art_bytes(&self) -> Vec<u8> {
-        let mut client = self.connect();
-        if let Some(song) = client.currentsong().unwrap() {
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return vec![],
+        };
+        if let Some(song) = client.currentsong().unwrap_or(None) {
             client.albumart(&song).unwrap_or_default()
         } else {
             vec![]
@@ -67,21 +79,30 @@ impl MpdClient for LiveMpdClient {
     }
 
     fn toggle_play(&self) {
-        let mut client = self.connect();
-        if client.status().unwrap().state == State::Play {
-            client.pause(true).unwrap();
-        } else {
-            client.play().unwrap();
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return,
+        };
+        match client.status().map(|s| s.state) {
+            Ok(State::Play) => { client.pause(true).ok(); }
+            Ok(_) => { client.play().ok(); }
+            Err(_) => {}
         }
     }
 
     fn next_song(&self) {
-        let mut client = self.connect();
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return,
+        };
         client.next().ok();
     }
 
     fn previous_song(&self) {
-        let mut client = self.connect();
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return,
+        };
         client.prev().ok();
     }
 }
