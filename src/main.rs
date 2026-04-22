@@ -1,10 +1,10 @@
-use futures::channel::mpsc;
 use futures::{SinkExt, Stream};
 use iced::widget::{button, column, container, image as widgetImage, row, text};
 use iced::{Element, Fill, Subscription, Task, stream};
 use mpd_client::{LiveMpdClient, MpdClient};
 use std::sync::Arc;
-use std::thread;
+
+use crate::mpd_client::SongInfo;
 
 mod mpd_api;
 mod mpd_client;
@@ -15,6 +15,9 @@ enum Message {
     NextSong,
     PreviousSong,
     RefreshDisplay,
+    RefreshSongInfo,
+    RefreshAlbumArt,
+    SongInfoLoaded(SongInfo),
     AlbumArtLoaded(Option<widgetImage::Handle>),
 }
 
@@ -43,22 +46,38 @@ impl SongData {
         match message {
             Message::TogglePlay => {
                 self.client.toggle_play();
-                Task::none()
+                Task::done(Message::RefreshSongInfo)
             }
             Message::NextSong => {
                 self.client.next_song();
-                Task::none()
+                Task::done(Message::RefreshSongInfo)
             }
             Message::PreviousSong => {
                 self.client.previous_song();
+                Task::done(Message::RefreshSongInfo)
+            }
+            Message::RefreshSongInfo => {
+                let client = Arc::clone(&self.client);
+                Task::perform(
+                    async move { client.get_song_info() },
+                    Message::SongInfoLoaded,
+                )
+            }
+            Message::SongInfoLoaded(song_info) => {
+                self.playing = song_info.playing;
+                self.song_title = song_info.title;
+                self.artist = song_info.artist;
+                self.album = song_info.album;
                 Task::none()
             }
             Message::RefreshDisplay => {
-                let info = self.client.get_song_info();
-                self.playing = info.playing;
-                self.song_title = info.title;
-                self.artist = info.artist;
-                self.album = info.album;
+                let tasks = vec![
+                    Task::done(Message::RefreshSongInfo),
+                    Task::done(Message::RefreshAlbumArt),
+                ];
+                Task::batch(tasks)
+            }
+            Message::RefreshAlbumArt => {
                 let client = Arc::clone(&self.client);
                 Task::perform(
                     async move {
@@ -108,7 +127,7 @@ impl SongData {
 
 impl Default for SongData {
     fn default() -> Self {
-        Self::new(Arc::new(LiveMpdClient::new("127.0.0.1:6600")))
+        Self::new(Arc::new(LiveMpdClient::new("10.0.0.111:6600")))
     }
 }
 
@@ -136,15 +155,13 @@ fn player_change_listener() -> impl Stream<Item = Message> {
             .await
             .expect("Failed to send initial refresh");
 
-        let (sender, mut receiver) = mpsc::channel::<()>(1);
         loop {
-            use iced::futures::StreamExt;
-            let mut tx = sender.clone();
-            thread::spawn(move || {
+            let player_changed = tokio::task::spawn_blocking(|| {
                 mpd_api::check_player_change();
-                let _ = futures::executor::block_on(tx.send(()));
             });
-            receiver.select_next_some().await;
+
+            let _result = player_changed.await;
+
             output
                 .send(Message::RefreshDisplay)
                 .await
@@ -156,7 +173,7 @@ fn player_change_listener() -> impl Stream<Item = Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mpd_client::{mock::MockMpdClient, SongInfo};
+    use mpd_client::{SongInfo, mock::MockMpdClient};
 
     fn test_song_info() -> SongInfo {
         SongInfo {

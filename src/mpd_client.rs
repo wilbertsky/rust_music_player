@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use mpd::{Client, State};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SongInfo {
@@ -9,12 +9,18 @@ pub struct SongInfo {
     pub playing: bool,
 }
 
+pub struct QueueItem {
+    pub song_info: SongInfo,
+    pub position: Option<u32>,
+}
+
 pub trait MpdClient: Send + Sync + 'static {
     fn get_song_info(&self) -> SongInfo;
     fn get_album_art_bytes(&self) -> Vec<u8>;
     fn toggle_play(&self);
     fn next_song(&self);
     fn previous_song(&self);
+    fn get_queue(&self) -> Vec<QueueItem>;
 }
 
 pub struct LiveMpdClient {
@@ -35,15 +41,20 @@ impl MpdClient for LiveMpdClient {
     fn get_song_info(&self) -> SongInfo {
         let mut client = match self.connect() {
             Some(c) => c,
-            None => return SongInfo {
-                title: "Disconnected".to_string(),
-                artist: String::new(),
-                album: String::new(),
-                playing: false,
-            },
+            None => {
+                return SongInfo {
+                    title: "Disconnected".to_string(),
+                    artist: String::new(),
+                    album: String::new(),
+                    playing: false,
+                };
+            }
         };
 
-        let playing = client.status().map(|s| s.state == State::Play).unwrap_or(false);
+        let playing = client
+            .status()
+            .map(|s| s.state == State::Play)
+            .unwrap_or(false);
         let current_song = client.currentsong().unwrap_or(None);
 
         let (title, artist, album) = if let Some(song) = current_song {
@@ -63,7 +74,12 @@ impl MpdClient for LiveMpdClient {
             )
         };
 
-        SongInfo { title, artist, album, playing }
+        SongInfo {
+            title,
+            artist,
+            album,
+            playing,
+        }
     }
 
     fn get_album_art_bytes(&self) -> Vec<u8> {
@@ -84,8 +100,12 @@ impl MpdClient for LiveMpdClient {
             None => return,
         };
         match client.status().map(|s| s.state) {
-            Ok(State::Play) => { client.pause(true).ok(); }
-            Ok(_) => { client.play().ok(); }
+            Ok(State::Play) => {
+                client.pause(true).ok();
+            }
+            Ok(_) => {
+                client.play().ok();
+            }
             Err(_) => {}
         }
     }
@@ -104,6 +124,51 @@ impl MpdClient for LiveMpdClient {
             None => return,
         };
         client.prev().ok();
+    }
+
+    //     fn get_current_song($self) {
+    //         let mut client = match self.connect() {
+    //             Some(c) => c,
+    //             None => return,
+    //         };
+    //         // client get current song.
+    //     }
+    //
+    fn get_queue(&self) -> Vec<QueueItem> {
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return vec![],
+        };
+
+        let queue = client.queue().unwrap_or_default();
+
+        queue
+            .into_iter()
+            .map(|song| {
+                let title = song.title.unwrap_or_else(|| "Unknown".to_string());
+                let artist = song.artist.unwrap_or_else(|| "Unknown".to_string());
+                let tags: HashMap<String, String> = song.tags.into_iter().collect();
+                let album = tags
+                    .get("Album")
+                    .cloned()
+                    .unwrap_or_else(|| "Album Unknown".to_string());
+                let playing = false;
+                let position = song.place.map(|p| p.pos);
+
+                let song_info = SongInfo {
+                    title,
+                    artist,
+                    album,
+                    playing,
+                };
+
+                QueueItem {
+                    song_info,
+                    position,
+                }
+                // vec![title, artist, album]
+            })
+            .collect()
     }
 }
 

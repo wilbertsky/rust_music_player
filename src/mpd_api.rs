@@ -1,9 +1,9 @@
 use mpd::{Client, Idle};
 
 pub fn check_player_change() {
-    match Client::connect("127.0.0.1:6600") {
+    match Client::connect("10.0.0.111:6600") {
         Ok(mut client) => {
-            client.idle(&[mpd::idle::Subsystem::Player]).ok();
+            client.wait(&[mpd::idle::Subsystem::Player]).ok();
         }
         Err(_) => {
             std::thread::sleep(std::time::Duration::from_secs(5));
@@ -42,7 +42,11 @@ mod tests {
         if !bytes.is_empty() {
             let is_jpeg = bytes.starts_with(&[0xFF, 0xD8, 0xFF]);
             let is_png = bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]);
-            assert!(is_jpeg || is_png, "album art must be JPEG or PNG, got: {:02X?}", &bytes[..4]);
+            assert!(
+                is_jpeg || is_png,
+                "album art must be JPEG or PNG, got: {:02X?}",
+                &bytes[..4]
+            );
         }
     }
 }
