@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "*", features = ["image"] }
+iced = { version = "*", features = ["image", "tokio"] }
 mpd = "*"
 image = "*"
 futures = "0.3.*"
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.52.1", features = ["full"] }
