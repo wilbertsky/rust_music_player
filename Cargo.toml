@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+iced_fonts = { version = "0.3.0", features = ["fontawesome", "lucide"] }
 iced = { version = "*", features = ["image", "tokio"] }
 mpd = "*"
 image = "*"
