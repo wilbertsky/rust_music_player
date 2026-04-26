@@ -7,10 +7,6 @@ pub struct SongInfo {
     pub artist: String,
     pub album: String,
     pub playing: bool,
-}
-
-pub struct QueueItem {
-    pub song_info: SongInfo,
     pub position: Option<u32>,
 }
 
@@ -20,7 +16,9 @@ pub trait MpdClient: Send + Sync + 'static {
     fn toggle_play(&self);
     fn next_song(&self);
     fn previous_song(&self);
-    fn get_queue(&self) -> Vec<QueueItem>;
+    fn get_queue(&self) -> Vec<SongInfo>;
+    fn play_queue_position(&self, position: u32);
+    fn delete_queue_position(&self, position: u32);
 }
 
 pub struct LiveMpdClient {
@@ -47,6 +45,7 @@ impl MpdClient for LiveMpdClient {
                     artist: String::new(),
                     album: String::new(),
                     playing: false,
+                    position: None,
                 };
             }
         };
@@ -57,7 +56,7 @@ impl MpdClient for LiveMpdClient {
             .unwrap_or(false);
         let current_song = client.currentsong().unwrap_or(None);
 
-        let (title, artist, album) = if let Some(song) = current_song {
+        let (title, artist, album, position) = if let Some(song) = current_song {
             let title = song.title.unwrap_or_else(|| "Unknown".to_string());
             let artist = song.artist.unwrap_or_else(|| "Unknown".to_string());
             let tags: HashMap<String, String> = song.tags.into_iter().collect();
@@ -65,12 +64,14 @@ impl MpdClient for LiveMpdClient {
                 .get("Album")
                 .cloned()
                 .unwrap_or_else(|| "Album Unknown".to_string());
-            (title, artist, album)
+            let position = song.place.map(|p| p.pos);
+            (title, artist, album, position)
         } else {
             (
                 "Unknown".to_string(),
                 "Unknown".to_string(),
                 "Album Unknown".to_string(),
+                None,
             )
         };
 
@@ -79,6 +80,7 @@ impl MpdClient for LiveMpdClient {
             artist,
             album,
             playing,
+            position,
         }
     }
 
@@ -126,15 +128,25 @@ impl MpdClient for LiveMpdClient {
         client.prev().ok();
     }
 
-    //     fn get_current_song($self) {
-    //         let mut client = match self.connect() {
-    //             Some(c) => c,
-    //             None => return,
-    //         };
-    //         // client get current song.
-    //     }
-    //
-    fn get_queue(&self) -> Vec<QueueItem> {
+    fn play_queue_position(&self, position: u32) {
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let _result = client.switch(position);
+    }
+
+    fn delete_queue_position(&self, position: u32) {
+        let mut client = match self.connect() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let _result = client.delete(position);
+    }
+
+    fn get_queue(&self) -> Vec<SongInfo> {
         let mut client = match self.connect() {
             Some(c) => c,
             None => return vec![],
@@ -155,18 +167,13 @@ impl MpdClient for LiveMpdClient {
                 let playing = false;
                 let position = song.place.map(|p| p.pos);
 
-                let song_info = SongInfo {
+                SongInfo {
                     title,
                     artist,
                     album,
                     playing,
-                };
-
-                QueueItem {
-                    song_info,
                     position,
                 }
-                // vec![title, artist, album]
             })
             .collect()
     }
@@ -184,6 +191,10 @@ pub mod mock {
         pub previous_song: usize,
         pub get_song_info: usize,
         pub get_album_art_bytes: usize,
+        pub queue: usize,
+        pub get_queue: Vec<SongInfo>,
+        pub play_queue_postion: usize,
+        pub delete_queue_position: usize,
     }
 
     pub struct MockMpdClient {
@@ -230,6 +241,27 @@ pub mod mock {
 
         fn previous_song(&self) {
             self.log.lock().unwrap().previous_song += 1;
+        }
+
+        fn get_queue(&self) -> Vec<SongInfo> {
+            self.log.lock().unwrap().queue += 1;
+            let song_info = SongInfo {
+                title: "Disconnected".to_string(),
+                artist: String::new(),
+                album: String::new(),
+                playing: false,
+                position: None,
+            };
+
+            vec![song_info]
+        }
+
+        fn delete_queue_position(&self, _position: u32) {
+            self.log.lock().unwrap().delete_queue_position += 1;
+        }
+
+        fn play_queue_position(&self, _position: u32) {
+            self.log.lock().unwrap().play_queue_postion += 1;
         }
     }
 }

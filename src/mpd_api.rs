@@ -49,4 +49,19 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    #[ignore = "requires a running MPD server at 127.0.0.1:6600"]
+    fn integration_get_queue() {
+        let client = LiveMpdClient::new("127.0.0.1:6600");
+        let queue = client.get_queue();
+        if !queue.is_empty() {
+            let song_info = queue.first().unwrap();
+            assert!(!song_info.title.is_empty());
+            assert!(song_info.playing);
+            assert!(!song_info.artist.is_empty());
+            assert!(!song_info.album.is_empty());
+            assert!(!song_info.position.is_some());
+        }
+    }
 }

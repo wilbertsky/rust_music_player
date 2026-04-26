@@ -1,6 +1,10 @@
 use futures::{SinkExt, Stream};
-use iced::widget::{button, column, container, image as widgetImage, row, text};
-use iced::{Element, Fill, Subscription, Task, stream};
+use iced::widget::{
+    Column, button, column, container, image as widgetImage, row, scrollable, text,
+};
+use iced::{Alignment, Element, Fill, Subscription, Task, Theme, stream};
+use iced_fonts::LUCIDE_FONT_BYTES;
+use iced_fonts::lucide::{pause, play, skip_back, skip_forward, square_minus};
 use mpd_client::{LiveMpdClient, MpdClient};
 use std::sync::Arc;
 
@@ -16,9 +20,13 @@ enum Message {
     PreviousSong,
     RefreshDisplay,
     RefreshSongInfo,
-    RefreshAlbumArt,
     SongInfoLoaded(SongInfo),
+    RefreshAlbumArt,
     AlbumArtLoaded(Option<widgetImage::Handle>),
+    RefreshSongQueue,
+    SongQueueLoaded(Vec<SongInfo>),
+    PlayQueueItem(u32),
+    DeleteQueueItem(u32),
 }
 
 struct SongData {
@@ -26,8 +34,10 @@ struct SongData {
     album: String,
     artist: String,
     playing: bool,
+    position: u32,
     album_art: Option<widgetImage::Handle>,
     client: Arc<dyn MpdClient>,
+    queue: Vec<SongInfo>,
 }
 
 impl SongData {
@@ -37,8 +47,10 @@ impl SongData {
             album: String::new(),
             artist: String::new(),
             playing: false,
+            position: 0,
             album_art: None,
             client,
+            queue: vec![],
         }
     }
 
@@ -68,12 +80,14 @@ impl SongData {
                 self.song_title = song_info.title;
                 self.artist = song_info.artist;
                 self.album = song_info.album;
+                self.position = song_info.position.unwrap_or(0);
                 Task::none()
             }
             Message::RefreshDisplay => {
                 let tasks = vec![
                     Task::done(Message::RefreshSongInfo),
                     Task::done(Message::RefreshAlbumArt),
+                    Task::done(Message::RefreshSongQueue),
                 ];
                 Task::batch(tasks)
             }
@@ -91,11 +105,29 @@ impl SongData {
                 self.album_art = handle;
                 Task::none()
             }
+            Message::RefreshSongQueue => {
+                let client = Arc::clone(&self.client);
+                Task::perform(async move { client.get_queue() }, Message::SongQueueLoaded)
+            }
+            Message::SongQueueLoaded(song_queue) => {
+                self.queue = song_queue;
+                Task::none()
+            }
+            Message::PlayQueueItem(position) => {
+                let client = Arc::clone(&self.client);
+                client.play_queue_position(position);
+                Task::done(Message::RefreshSongInfo)
+            }
+            Message::DeleteQueueItem(position) => {
+                let client = Arc::clone(&self.client);
+                client.delete_queue_position(position);
+                Task::done(Message::RefreshSongQueue)
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let play_button_icon = if self.playing { "[ ]" } else { " > " };
+        let play_button_icon = if self.playing { pause() } else { play() };
 
         let art_row: Element<'_, Message> = if let Some(handle) = &self.album_art {
             widgetImage(handle.clone()).width(500).height(500).into()
@@ -103,17 +135,105 @@ impl SongData {
             text("").into()
         };
 
+        let queue_list: Vec<Element<Message>> = self
+            .queue
+            .iter()
+            .map(|song| {
+                let label = format!("{} - {}", &song.album, &song.title);
+                let is_current = song.position.unwrap_or(0) == self.position;
+                let song_button = button(text(label))
+                    .style(move |theme: &iced::Theme, _status| button::Style {
+                        background: None,
+                        text_color: if is_current {
+                            theme.palette().danger
+                        } else {
+                            theme.palette().text
+                        },
+                        ..Default::default()
+                    })
+                    .width(Fill)
+                    .on_press(Message::PlayQueueItem(song.position.unwrap_or(0)));
+                let delete_button = button(square_minus())
+                    .style(move |theme: &iced::Theme, status| {
+                        let color = match status {
+                            button::Status::Hovered => theme.palette().danger,
+                            _ => theme.palette().text,
+                        };
+
+                        button::Style {
+                            background: None,
+                            text_color: color,
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::DeleteQueueItem(song.position.unwrap_or(0)));
+
+                row![column![song_button], column![delete_button]].into()
+            })
+            .collect();
+
         container(column![
-            art_row,
-            row![text(&self.song_title)],
-            row![text(&self.artist)],
-            row![text(&self.album)],
-            row![
-                button(" << ").on_press(Message::PreviousSong),
-                button(play_button_icon).on_press(Message::TogglePlay),
-                button(" >> ").on_press(Message::NextSong),
-            ]
-            .spacing(10)
+            container(
+                column![
+                    row![text(format!(
+                        "{} - {} - {}",
+                        &self.song_title, &self.artist, &self.album
+                    ))]
+                    .spacing(10),
+                    row![
+                        button(skip_back().style(|theme: &iced::Theme| {
+                            text::Style {
+                                color: Some(theme.palette().primary),
+                            }
+                        }))
+                        .style(|_theme: &iced::Theme, _status| {
+                            button::Style {
+                                background: None,
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::PreviousSong),
+                        button(play_button_icon.style(|theme: &iced::Theme| {
+                            text::Style {
+                                color: Some(theme.palette().primary),
+                            }
+                        }))
+                        .style(|_theme: &iced::Theme, _status| {
+                            button::Style {
+                                background: None,
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::TogglePlay),
+                        button(skip_forward().style(|theme: &iced::Theme| {
+                            text::Style {
+                                color: Some(theme.palette().primary),
+                            }
+                        }))
+                        .style(|_theme: &iced::Theme, _status| {
+                            button::Style {
+                                background: None,
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::NextSong)
+                    ]
+                    .spacing(10)
+                ]
+                .align_x(Alignment::Center)
+                .spacing(10)
+            )
+            .padding(10)
+            .center_x(Fill),
+            container(
+                row![
+                    art_row,
+                    scrollable(Column::with_children(queue_list)).height(500)
+                ]
+                .spacing(10)
+                .height(Fill),
+            )
+            .center_x(Fill),
         ])
         .padding(10)
         .center_x(Fill)
@@ -143,8 +263,15 @@ fn decode_album_art(bytes: Vec<u8>) -> Option<widgetImage::Handle> {
 }
 
 fn main() -> iced::Result {
+    let min_window_size = iced::window::Settings {
+        min_size: Some(iced::Size::new(800.0, 600.0)),
+        ..Default::default()
+    };
     iced::application(SongData::default, SongData::update, SongData::view)
         .subscription(SongData::subscription)
+        .window(min_window_size)
+        .theme(Theme::TokyoNightStorm)
+        .font(LUCIDE_FONT_BYTES)
         .run()
 }
 
@@ -181,6 +308,7 @@ mod tests {
             artist: "Test Artist".to_string(),
             album: "Test Album".to_string(),
             playing: true,
+            position: Some(0),
         }
     }
 
@@ -237,6 +365,22 @@ mod tests {
         let (mock, log) = MockMpdClient::new(test_song_info());
         let mut state = SongData::new(Arc::new(mock));
         let _ = state.update(Message::RefreshDisplay);
+        assert_eq!(log.lock().unwrap().get_song_info, 1);
+    }
+
+    #[test]
+    fn test_play_queue_position() {
+        let (mock, log) = MockMpdClient::new(test_song_info());
+        let mut state = SongData::new(Arc::new(mock));
+        let _ = state.update(Message::PlayQueueItem(1));
+        assert_eq!(log.lock().unwrap().get_song_info, 1);
+    }
+
+    #[test]
+    fn test_delete_queue_position() {
+        let (mock, log) = MockMpdClient::new(test_song_info());
+        let mut state = SongData::new(Arc::new(mock));
+        let _ = state.update(Message::DeleteQueueItem(1));
         assert_eq!(log.lock().unwrap().get_song_info, 1);
     }
 
