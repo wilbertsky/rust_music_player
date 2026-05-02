@@ -1,3 +1,4 @@
+use config::Config;
 use futures::{SinkExt, Stream};
 use iced::widget::{
     Column, button, column, container, image as widgetImage, row, scrollable, text,
@@ -10,6 +11,7 @@ use std::sync::Arc;
 
 use crate::mpd_client::SongInfo;
 
+mod config;
 mod mpd_api;
 mod mpd_client;
 
@@ -38,10 +40,12 @@ struct SongData {
     album_art: Option<widgetImage::Handle>,
     client: Arc<dyn MpdClient>,
     queue: Vec<SongInfo>,
+    config: Config,
 }
 
 impl SongData {
-    fn new(client: Arc<dyn MpdClient>) -> Self {
+    fn new(client: Arc<dyn MpdClient>, config: Config) -> Self {
+        config.save().ok();
         Self {
             song_title: String::new(),
             album: String::new(),
@@ -51,6 +55,7 @@ impl SongData {
             album_art: None,
             client,
             queue: vec![],
+            config: config,
         }
     }
 
@@ -247,7 +252,9 @@ impl SongData {
 
 impl Default for SongData {
     fn default() -> Self {
-        Self::new(Arc::new(LiveMpdClient::new("10.0.0.111:6600")))
+        let config = Config::load().unwrap_or_default();
+        let client = LiveMpdClient::new(&config.mpd_address);
+        Self::new(Arc::new(client), config)
     }
 }
 
@@ -270,7 +277,7 @@ fn main() -> iced::Result {
     iced::application(SongData::default, SongData::update, SongData::view)
         .subscription(SongData::subscription)
         .window(min_window_size)
-        .theme(Theme::TokyoNightStorm)
+        .theme(|state: &SongData| theme_from_string(&state.config.theme))
         .font(LUCIDE_FONT_BYTES)
         .run()
 }
@@ -295,6 +302,14 @@ fn player_change_listener() -> impl Stream<Item = Message> {
                 .expect("Failed to send player change notification");
         }
     })
+}
+
+fn theme_from_string(theme: &str) -> iced::Theme {
+    Theme::ALL
+        .iter()
+        .find(|t| t.to_string() == theme)
+        .cloned()
+        .unwrap_or(Theme::Moonfly)
 }
 
 #[cfg(test)]
