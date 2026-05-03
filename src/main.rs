@@ -1,7 +1,7 @@
 use config::Config;
 use futures::{SinkExt, Stream};
 use iced::widget::{
-    Column, button, column, container, image as widgetImage, row, scrollable, text,
+    Column, button, column, container, image as widgetImage, pick_list, row, scrollable, text,
 };
 use iced::{Alignment, Element, Fill, Subscription, Task, Theme, stream};
 use iced_fonts::LUCIDE_FONT_BYTES;
@@ -29,6 +29,7 @@ enum Message {
     SongQueueLoaded(Vec<SongInfo>),
     PlayQueueItem(u32),
     DeleteQueueItem(u32),
+    ThemeChanged(iced::Theme),
 }
 
 struct SongData {
@@ -128,6 +129,12 @@ impl SongData {
                 client.delete_queue_position(position);
                 Task::done(Message::RefreshSongQueue)
             }
+            Message::ThemeChanged(theme) => {
+                let theme_name = theme.to_string();
+                self.config.theme = theme_name;
+                self.config.save().ok();
+                Task::none()
+            }
         }
     }
 
@@ -180,10 +187,17 @@ impl SongData {
         container(column![
             container(
                 column![
-                    row![text(format!(
-                        "{} - {} - {}",
-                        &self.song_title, &self.artist, &self.album
-                    ))]
+                    row![
+                        text(format!(
+                            "{} - {} - {}",
+                            &self.song_title, &self.artist, &self.album,
+                        )),
+                        pick_list(
+                            iced::Theme::ALL,
+                            Some(theme_from_string(&self.config.theme)),
+                            Message::ThemeChanged,
+                        )
+                    ]
                     .spacing(10),
                     row![
                         button(skip_back().style(|theme: &iced::Theme| {
