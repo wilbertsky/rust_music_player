@@ -192,7 +192,7 @@ pub mod mock {
         pub get_song_info: usize,
         pub get_album_art_bytes: usize,
         pub queue: usize,
-        pub get_queue: Vec<SongInfo>,
+        // pub get_queue: Vec<SongInfo>,
         pub play_queue_postion: usize,
         pub delete_queue_position: usize,
     }
@@ -214,10 +214,10 @@ pub mod mock {
             (mock, log)
         }
 
-        pub fn with_album_art(mut self, bytes: Vec<u8>) -> Self {
-            self.album_art_bytes = bytes;
-            self
-        }
+        // pub fn with_album_art(mut self, bytes: Vec<u8>) -> Self {
+        //     self.album_art_bytes = bytes;
+        //     self
+        // }
     }
 
     impl MpdClient for MockMpdClient {

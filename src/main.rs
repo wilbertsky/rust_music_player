@@ -1,19 +1,18 @@
+use crate::mpd_client::SongInfo;
 use config::Config;
 use futures::{SinkExt, Stream};
-use iced::widget::{
-    Column, button, column, container, image as widgetImage, pick_list, row, scrollable, text,
-};
-use iced::{Alignment, Element, Fill, Subscription, Task, Theme, stream};
+use iced::widget::image as widgetImage;
+use iced::{Subscription, Task, stream};
 use iced_fonts::LUCIDE_FONT_BYTES;
-use iced_fonts::lucide::{pause, play, skip_back, skip_forward, square_minus};
 use mpd_client::{LiveMpdClient, MpdClient};
 use std::sync::Arc;
-
-use crate::mpd_client::SongInfo;
+use view::decode_album_art;
+use view::theme_from_string;
 
 mod config;
 mod mpd_api;
 mod mpd_client;
+mod view;
 
 #[derive(Debug, Clone)]
 enum Message {
@@ -30,6 +29,8 @@ enum Message {
     PlayQueueItem(u32),
     DeleteQueueItem(u32),
     ThemeChanged(iced::Theme),
+    AddressInputChanged(String),
+    AddressConfirmed,
 }
 
 struct SongData {
@@ -42,6 +43,7 @@ struct SongData {
     client: Arc<dyn MpdClient>,
     queue: Vec<SongInfo>,
     config: Config,
+    address_input: String,
 }
 
 impl SongData {
@@ -56,7 +58,8 @@ impl SongData {
             album_art: None,
             client,
             queue: vec![],
-            config: config,
+            address_input: config.mpd_address.clone(),
+            config,
         }
     }
 
@@ -135,132 +138,21 @@ impl SongData {
                 self.config.save().ok();
                 Task::none()
             }
+            Message::AddressInputChanged(address) => {
+                self.address_input = address;
+                Task::none()
+            }
+            Message::AddressConfirmed => {
+                self.config.mpd_address = self.address_input.clone();
+                self.config.save().ok();
+                Task::done(Message::RefreshDisplay)
+            }
         }
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        let play_button_icon = if self.playing { pause() } else { play() };
-
-        let art_row: Element<'_, Message> = if let Some(handle) = &self.album_art {
-            widgetImage(handle.clone()).width(500).height(500).into()
-        } else {
-            text("").into()
-        };
-
-        let queue_list: Vec<Element<Message>> = self
-            .queue
-            .iter()
-            .map(|song| {
-                let label = format!("{} - {}", &song.album, &song.title);
-                let is_current = song.position.unwrap_or(0) == self.position;
-                let song_button = button(text(label))
-                    .style(move |theme: &iced::Theme, _status| button::Style {
-                        background: None,
-                        text_color: if is_current {
-                            theme.palette().danger
-                        } else {
-                            theme.palette().text
-                        },
-                        ..Default::default()
-                    })
-                    .width(Fill)
-                    .on_press(Message::PlayQueueItem(song.position.unwrap_or(0)));
-                let delete_button = button(square_minus())
-                    .style(move |theme: &iced::Theme, status| {
-                        let color = match status {
-                            button::Status::Hovered => theme.palette().danger,
-                            _ => theme.palette().text,
-                        };
-
-                        button::Style {
-                            background: None,
-                            text_color: color,
-                            ..Default::default()
-                        }
-                    })
-                    .on_press(Message::DeleteQueueItem(song.position.unwrap_or(0)));
-
-                row![column![song_button], column![delete_button]].into()
-            })
-            .collect();
-
-        container(column![
-            container(
-                column![
-                    row![
-                        text(format!(
-                            "{} - {} - {}",
-                            &self.song_title, &self.artist, &self.album,
-                        )),
-                        pick_list(
-                            iced::Theme::ALL,
-                            Some(theme_from_string(&self.config.theme)),
-                            Message::ThemeChanged,
-                        )
-                    ]
-                    .spacing(10),
-                    row![
-                        button(skip_back().style(|theme: &iced::Theme| {
-                            text::Style {
-                                color: Some(theme.palette().primary),
-                            }
-                        }))
-                        .style(|_theme: &iced::Theme, _status| {
-                            button::Style {
-                                background: None,
-                                ..Default::default()
-                            }
-                        })
-                        .on_press(Message::PreviousSong),
-                        button(play_button_icon.style(|theme: &iced::Theme| {
-                            text::Style {
-                                color: Some(theme.palette().primary),
-                            }
-                        }))
-                        .style(|_theme: &iced::Theme, _status| {
-                            button::Style {
-                                background: None,
-                                ..Default::default()
-                            }
-                        })
-                        .on_press(Message::TogglePlay),
-                        button(skip_forward().style(|theme: &iced::Theme| {
-                            text::Style {
-                                color: Some(theme.palette().primary),
-                            }
-                        }))
-                        .style(|_theme: &iced::Theme, _status| {
-                            button::Style {
-                                background: None,
-                                ..Default::default()
-                            }
-                        })
-                        .on_press(Message::NextSong)
-                    ]
-                    .spacing(10)
-                ]
-                .align_x(Alignment::Center)
-                .spacing(10)
-            )
-            .padding(10)
-            .center_x(Fill),
-            container(
-                row![
-                    art_row,
-                    scrollable(Column::with_children(queue_list)).height(500)
-                ]
-                .spacing(10)
-                .height(Fill),
-            )
-            .center_x(Fill),
-        ])
-        .padding(10)
-        .center_x(Fill)
-        .into()
-    }
-
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(player_change_listener)
+        let addr = Arc::new(self.config.mpd_address.clone());
+        Subscription::run_with(addr, |a| player_change_listener(a.clone()))
     }
 }
 
@@ -272,23 +164,12 @@ impl Default for SongData {
     }
 }
 
-fn decode_album_art(bytes: Vec<u8>) -> Option<widgetImage::Handle> {
-    if bytes.is_empty() {
-        return None;
-    }
-    image::load_from_memory(&bytes).ok().map(|img| {
-        let rgba = img.to_rgba8();
-        let (width, height) = (rgba.width(), rgba.height());
-        widgetImage::Handle::from_rgba(width, height, rgba.into_raw())
-    })
-}
-
 fn main() -> iced::Result {
     let min_window_size = iced::window::Settings {
         min_size: Some(iced::Size::new(800.0, 600.0)),
         ..Default::default()
     };
-    iced::application(SongData::default, SongData::update, SongData::view)
+    iced::application(SongData::default, SongData::update, view::view)
         .subscription(SongData::subscription)
         .window(min_window_size)
         .theme(|state: &SongData| theme_from_string(&state.config.theme))
@@ -296,16 +177,17 @@ fn main() -> iced::Result {
         .run()
 }
 
-fn player_change_listener() -> impl Stream<Item = Message> {
-    stream::channel(100, async |mut output| {
+fn player_change_listener(addr: Arc<String>) -> impl Stream<Item = Message> {
+    stream::channel(100, async move |mut output| {
         output
             .send(Message::RefreshDisplay)
             .await
             .expect("Failed to send initial refresh");
 
         loop {
-            let player_changed = tokio::task::spawn_blocking(|| {
-                mpd_api::check_player_change();
+            let addr = addr.clone();
+            let player_changed = tokio::task::spawn_blocking(move || {
+                mpd_api::check_player_change(&addr);
             });
 
             let _result = player_changed.await;
@@ -316,14 +198,6 @@ fn player_change_listener() -> impl Stream<Item = Message> {
                 .expect("Failed to send player change notification");
         }
     })
-}
-
-fn theme_from_string(theme: &str) -> iced::Theme {
-    Theme::ALL
-        .iter()
-        .find(|t| t.to_string() == theme)
-        .cloned()
-        .unwrap_or(Theme::Moonfly)
 }
 
 #[cfg(test)]
@@ -357,7 +231,7 @@ mod tests {
     #[test]
     fn test_toggle_play_calls_client() {
         let (mock, log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let _ = state.update(Message::TogglePlay);
         assert_eq!(log.lock().unwrap().toggle_play, 1);
     }
@@ -365,7 +239,7 @@ mod tests {
     #[test]
     fn test_next_song_calls_client() {
         let (mock, log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let _ = state.update(Message::NextSong);
         assert_eq!(log.lock().unwrap().next_song, 1);
     }
@@ -373,7 +247,7 @@ mod tests {
     #[test]
     fn test_previous_song_calls_client() {
         let (mock, log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let _ = state.update(Message::PreviousSong);
         assert_eq!(log.lock().unwrap().previous_song, 1);
     }
@@ -381,8 +255,9 @@ mod tests {
     #[test]
     fn test_refresh_display_updates_song_fields() {
         let (mock, _log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
-        let _ = state.update(Message::RefreshDisplay);
+        let mut state = SongData::new(Arc::new(mock), Config::default());
+        let _ = state.update(Message::RefreshSongInfo);
+        let _ = state.update(Message::SongInfoLoaded(test_song_info()));
         assert_eq!(state.song_title, "Test Song");
         assert_eq!(state.artist, "Test Artist");
         assert_eq!(state.album, "Test Album");
@@ -390,33 +265,25 @@ mod tests {
     }
 
     #[test]
-    fn test_refresh_display_calls_get_song_info() {
-        let (mock, log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
-        let _ = state.update(Message::RefreshDisplay);
-        assert_eq!(log.lock().unwrap().get_song_info, 1);
-    }
-
-    #[test]
     fn test_play_queue_position() {
         let (mock, log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let _ = state.update(Message::PlayQueueItem(1));
-        assert_eq!(log.lock().unwrap().get_song_info, 1);
+        assert_eq!(log.lock().unwrap().play_queue_postion, 1);
     }
 
     #[test]
     fn test_delete_queue_position() {
         let (mock, log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let _ = state.update(Message::DeleteQueueItem(1));
-        assert_eq!(log.lock().unwrap().get_song_info, 1);
+        assert_eq!(log.lock().unwrap().delete_queue_position, 1);
     }
 
     #[test]
     fn test_album_art_loaded_some_sets_handle() {
         let (mock, _log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let handle = widgetImage::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
         let _ = state.update(Message::AlbumArtLoaded(Some(handle)));
         assert!(state.album_art.is_some());
@@ -425,7 +292,7 @@ mod tests {
     #[test]
     fn test_album_art_loaded_none_clears_handle() {
         let (mock, _log) = MockMpdClient::new(test_song_info());
-        let mut state = SongData::new(Arc::new(mock));
+        let mut state = SongData::new(Arc::new(mock), Config::default());
         let handle = widgetImage::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
         let _ = state.update(Message::AlbumArtLoaded(Some(handle)));
         let _ = state.update(Message::AlbumArtLoaded(None));

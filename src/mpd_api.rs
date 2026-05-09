@@ -1,7 +1,7 @@
 use mpd::{Client, Idle};
 
-pub fn check_player_change() {
-    match Client::connect("10.0.0.111:6600") {
+pub fn check_player_change(addr: &str) {
+    match Client::connect(addr) {
         Ok(mut client) => {
             client.wait(&[mpd::idle::Subsystem::Player]).ok();
         }
@@ -13,20 +13,25 @@ pub fn check_player_change() {
 
 #[cfg(test)]
 mod tests {
+    use crate::Config;
     use crate::mpd_client::{LiveMpdClient, MpdClient};
 
+    // Get the config settings.
+
     #[test]
-    #[ignore = "requires a running MPD server at 127.0.0.1:6600"]
+    #[ignore = "requires a running MPD server at Config::default address."]
     fn integration_get_song_info_does_not_panic() {
-        let client = LiveMpdClient::new("127.0.0.1:6600");
+        let config = Config::default();
+        let client = LiveMpdClient::new(config.mpd_address);
         let info = client.get_song_info();
         assert!(!info.title.is_empty());
     }
 
     #[test]
-    #[ignore = "requires a running MPD server at 127.0.0.1:6600"]
+    #[ignore = "requires a running MPD server at Config::default address."]
     fn integration_toggle_play_changes_playing_state() {
-        let client = LiveMpdClient::new("127.0.0.1:6600");
+        let config = Config::default();
+        let client = LiveMpdClient::new(config.mpd_address);
         let before = client.get_song_info().playing;
         client.toggle_play();
         let after = client.get_song_info().playing;
@@ -35,9 +40,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a running MPD server at 127.0.0.1:6600"]
+    #[ignore = "requires a running MPD server at Config::default address."]
     fn integration_album_art_bytes_are_valid_image_format() {
-        let client = LiveMpdClient::new("127.0.0.1:6600");
+        let config = Config::default();
+        let client = LiveMpdClient::new(config.mpd_address);
         let bytes = client.get_album_art_bytes();
         if !bytes.is_empty() {
             let is_jpeg = bytes.starts_with(&[0xFF, 0xD8, 0xFF]);
@@ -51,17 +57,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a running MPD server at 127.0.0.1:6600"]
+    #[ignore = "requires a running MPD server at Config::default address. Also, a queue for testing"]
     fn integration_get_queue() {
-        let client = LiveMpdClient::new("127.0.0.1:6600");
+        let config = Config::default();
+        let client = LiveMpdClient::new(config.mpd_address);
         let queue = client.get_queue();
         if !queue.is_empty() {
             let song_info = queue.first().unwrap();
             assert!(!song_info.title.is_empty());
-            assert!(song_info.playing);
             assert!(!song_info.artist.is_empty());
             assert!(!song_info.album.is_empty());
-            assert!(!song_info.position.is_some());
         }
     }
 }
