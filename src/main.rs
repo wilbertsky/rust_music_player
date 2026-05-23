@@ -15,6 +15,19 @@ mod mpd_client;
 mod view;
 
 #[derive(Debug, Clone)]
+enum PlayerView {
+    Player,
+    Library(LibraryView),
+}
+
+#[derive(Debug, Clone)]
+enum LibraryView {
+    Artists,
+    Albums(String),
+    Songs(String, String),
+}
+
+#[derive(Debug, Clone)]
 enum Message {
     TogglePlay,
     NextSong,
@@ -31,6 +44,7 @@ enum Message {
     ThemeChanged(iced::Theme),
     AddressInputChanged(String),
     AddressConfirmed,
+    SwitchView(PlayerView),
 }
 
 struct SongData {
@@ -44,6 +58,7 @@ struct SongData {
     queue: Vec<SongInfo>,
     config: Config,
     address_input: String,
+    current_view: PlayerView,
 }
 
 impl SongData {
@@ -60,6 +75,7 @@ impl SongData {
             queue: vec![],
             address_input: config.mpd_address.clone(),
             config,
+            current_view: PlayerView::Player,
         }
     }
 
@@ -146,6 +162,10 @@ impl SongData {
                 self.config.mpd_address = self.address_input.clone();
                 self.config.save().ok();
                 Task::done(Message::RefreshDisplay)
+            }
+            Message::SwitchView(view) => {
+                self.current_view = view;
+                Task::none()
             }
         }
     }

@@ -5,8 +5,12 @@ use iced::widget::{
     text_input,
 };
 use iced::{Alignment, Fill};
+use iced_fonts::lucide::library;
+use iced_fonts::lucide::music;
 use iced_fonts::lucide::{pause, play, skip_back, skip_forward, square_minus};
 
+use crate::LibraryView;
+use crate::PlayerView;
 use crate::{Message, SongData};
 
 pub fn decode_album_art(bytes: Vec<u8>) -> Option<widgetImage::Handle> {
@@ -28,15 +32,88 @@ pub fn theme_from_string(theme: &str) -> iced::Theme {
         .unwrap_or(Theme::Moonfly)
 }
 
-pub fn view(state: &SongData) -> Element<'_, Message> {
+fn hud_body(state: &SongData) -> Element<Message> {
     let play_button_icon = if state.playing { pause() } else { play() };
 
+    let view_button = if matches!(state.current_view, PlayerView::Player) {
+        button(library()).on_press(Message::SwitchView(PlayerView::Library(
+            LibraryView::Artists,
+        )))
+    } else {
+        button(music()).on_press(Message::SwitchView(PlayerView::Player))
+    };
+    container(
+        column![
+            row![
+                text(format!(
+                    "{} - {} - {}",
+                    &state.song_title, &state.artist, &state.album,
+                )),
+                pick_list(
+                    iced::Theme::ALL,
+                    Some(theme_from_string(&state.config.theme)),
+                    Message::ThemeChanged,
+                ),
+                view_button,
+                text_input("Enter MPD address including port", &state.address_input)
+                    .on_input(Message::AddressInputChanged),
+                button("Update MPD Address").on_press(Message::AddressConfirmed)
+            ]
+            .spacing(10),
+            row![
+                button(skip_back().style(|theme: &iced::Theme| {
+                    text::Style {
+                        color: Some(theme.palette().primary),
+                    }
+                }))
+                .style(|_theme: &iced::Theme, _status| {
+                    button::Style {
+                        background: None,
+                        ..Default::default()
+                    }
+                })
+                .on_press(Message::PreviousSong),
+                button(play_button_icon.style(|theme: &iced::Theme| {
+                    text::Style {
+                        color: Some(theme.palette().primary),
+                    }
+                }))
+                .style(|_theme: &iced::Theme, _status| {
+                    button::Style {
+                        background: None,
+                        ..Default::default()
+                    }
+                })
+                .on_press(Message::TogglePlay),
+                button(skip_forward().style(|theme: &iced::Theme| {
+                    text::Style {
+                        color: Some(theme.palette().primary),
+                    }
+                }))
+                .style(|_theme: &iced::Theme, _status| {
+                    button::Style {
+                        background: None,
+                        ..Default::default()
+                    }
+                })
+                .on_press(Message::NextSong)
+            ]
+            .spacing(10)
+        ]
+        .align_x(Alignment::Center)
+        .spacing(10),
+    )
+    .padding(10)
+    .center_x(Fill)
+    .into()
+}
+
+fn player_body(state: &SongData) -> Element<Message> {
     let art_row: Element<'_, Message> = if let Some(handle) = &state.album_art {
         widgetImage(handle.clone()).width(500).height(500).into()
     } else {
         text("").into()
     };
-
     let queue_list: Vec<Element<Message>> = state
         .queue
         .iter()
@@ -74,80 +151,31 @@ pub fn view(state: &SongData) -> Element<'_, Message> {
         })
         .collect();
 
-    container(column![
-        container(
-            column![
-                row![
-                    text(format!(
-                        "{} - {} - {}",
-                        &state.song_title, &state.artist, &state.album,
-                    )),
-                    pick_list(
-                        iced::Theme::ALL,
-                        Some(theme_from_string(&state.config.theme)),
-                        Message::ThemeChanged,
-                    ),
-                    text_input("Enter MPD address including port", &state.address_input)
-                        .on_input(Message::AddressInputChanged),
-                    button("Update MPD Address").on_press(Message::AddressConfirmed)
-                ]
-                .spacing(10),
-                row![
-                    button(skip_back().style(|theme: &iced::Theme| {
-                        text::Style {
-                            color: Some(theme.palette().primary),
-                        }
-                    }))
-                    .style(|_theme: &iced::Theme, _status| {
-                        button::Style {
-                            background: None,
-                            ..Default::default()
-                        }
-                    })
-                    .on_press(Message::PreviousSong),
-                    button(play_button_icon.style(|theme: &iced::Theme| {
-                        text::Style {
-                            color: Some(theme.palette().primary),
-                        }
-                    }))
-                    .style(|_theme: &iced::Theme, _status| {
-                        button::Style {
-                            background: None,
-                            ..Default::default()
-                        }
-                    })
-                    .on_press(Message::TogglePlay),
-                    button(skip_forward().style(|theme: &iced::Theme| {
-                        text::Style {
-                            color: Some(theme.palette().primary),
-                        }
-                    }))
-                    .style(|_theme: &iced::Theme, _status| {
-                        button::Style {
-                            background: None,
-                            ..Default::default()
-                        }
-                    })
-                    .on_press(Message::NextSong)
-                ]
-                .spacing(10)
-            ]
-            .align_x(Alignment::Center)
-            .spacing(10)
-        )
-        .padding(10)
-        .center_x(Fill),
-        container(
-            row![
-                art_row,
-                scrollable(Column::with_children(queue_list)).height(500)
-            ]
-            .spacing(10)
-            .height(Fill),
-        )
-        .center_x(Fill),
-    ])
-    .padding(10)
+    container(
+        row![
+            art_row,
+            scrollable(Column::with_children(queue_list)).height(500)
+        ]
+        .spacing(10)
+        .height(Fill),
+    )
     .center_x(Fill)
     .into()
+}
+
+fn library_body<'a>(state: &'a SongData, view: &'a LibraryView) -> Element<'a, Message> {
+    text("LibraryView").into()
+}
+
+pub fn view(state: &SongData) -> Element<'_, Message> {
+    let hud = hud_body(state);
+    let body = match &state.current_view {
+        PlayerView::Library(library_view) => library_body(state, library_view),
+        PlayerView::Player => player_body(state),
+    };
+
+    container(column![hud, body])
+        .padding(10)
+        .center_x(Fill)
+        .into()
 }
